@@ -108,7 +108,7 @@ uv run pytest tests/test_example.py -v
 │   ├── workflows/            # CI/CD workflows
 │   └── CODEOWNERS            # Code ownership file
 ├── src/
-│   └── ds_provider_unimicro_py_lib/     # Rename to your module name
+│   └── ds_provider_unimicro_py_lib/
 │       └── __init__.py
 ├── .pre-commit-config.yaml   # Pre-commit hooks configuration
 ├── tests/                    # Test files
@@ -135,7 +135,7 @@ uv run pytest tests/test_example.py -v
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.11+
 - [uv](https://github.com/astral-sh/uv) package manager
 - Make (for development commands)
 
