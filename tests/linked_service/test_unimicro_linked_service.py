@@ -7,7 +7,7 @@ Linked Service tests for Unimicro provider.
 
 import base64
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import jwt
 import pytest
@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, generate_private_key
 from cryptography.hazmat.primitives.serialization import NoEncryption, pkcs12
 from ds_protocol_http_py_lib.enums import AuthType
+from ds_protocol_http_py_lib.utils.http import Http
 from ds_resource_plugin_py_lib.common.resource.linked_service.errors import (
     AuthenticationError,
 )
@@ -57,12 +58,17 @@ def make_settings(certificate: str) -> UnimicroLinkedServiceSettings:
 
 
 def make_service(settings: UnimicroLinkedServiceSettings) -> UnimicroLinkedService:
-    return UnimicroLinkedService(
-        id=uuid.uuid4(),
-        name="unimicro",
-        version="v1.0.0",
-        settings=settings,
-    )
+    with patch.object(
+        UnimicroLinkedService,
+        "_get_token_endpoint",
+        return_value="https://login.unimicro.no/connect/token",
+    ):
+        return UnimicroLinkedService(
+            id=uuid.uuid4(),
+            name="unimicro",
+            version="v1.0.0",
+            settings=settings,
+        )
 
 
 def test_extracts_rsa_private_key() -> None:
@@ -73,15 +79,6 @@ def test_extracts_rsa_private_key() -> None:
 
     assert isinstance(extracted_key, RSAPrivateKey)
     assert extracted_key.private_numbers() == private_key.private_numbers()
-
-
-def test_rejects_non_rsa_private_key() -> None:
-    private_key = generate_ec_private_key(SECP256R1())
-    settings = make_settings(make_certificate(private_key))
-
-    with pytest.raises(AuthenticationError):
-        service = make_service(settings)
-        service._get_private_key()
 
 
 def test_creates_valid_client_token() -> None:
@@ -169,3 +166,69 @@ def test_raises_authentication_error_when_certificate_decoding_fails() -> None:
         pytest.raises(AuthenticationError, match="Failed to base64-decode certificate"),
     ):
         settings_object._get_private_key()
+
+
+def test_raises_authentication_error_when_pkcs12_loading_fails() -> None:
+    settings = make_settings("valid-looking-certificate")
+    service = object.__new__(UnimicroLinkedService)
+    service.settings = settings
+
+    with (
+        patch.object(base64, "b64decode", return_value=b"invalid-pkcs12"),
+        patch.object(
+            pkcs12,
+            "load_key_and_certificates",
+            side_effect=ValueError("invalid PKCS12 data"),
+        ),
+        pytest.raises(
+            AuthenticationError,
+            match=r"Failed to load private key from \.p12 file\.",
+        ),
+    ):
+        service._get_private_key()
+
+
+def test_configures_custom_auth() -> None:
+    private_key = generate_private_key(public_exponent=65537, key_size=2048)
+    settings = make_settings(make_certificate(private_key))
+
+    with (
+        patch.object(
+            UnimicroLinkedService,
+            "_get_token_endpoint",
+            return_value="https://login.unimicro.no/connect/token",
+        ),
+        patch.object(
+            UnimicroLinkedService,
+            "_get_private_key",
+            return_value=private_key,
+        ),
+    ):
+        service = make_service(settings)
+
+    assert service.settings.custom is not None
+
+
+def test_rejects_non_rsa_private_key() -> None:
+    private_key = generate_ec_private_key(SECP256R1())
+    settings = make_settings(make_certificate(private_key))
+
+    with pytest.raises(AuthenticationError):
+        make_service(settings)
+
+
+def test_gets_token_endpoint() -> None:
+    settings = make_settings("unused")
+    service = object.__new__(UnimicroLinkedService)
+    service.settings = settings
+
+    response = Mock()
+    response.json.return_value = {
+        "token_endpoint": "https://login.unimicro.no/connect/token",
+    }
+
+    with patch.object(Http, "get", return_value=response) as get:
+        token_endpoint = service._get_token_endpoint()
+
+    get.assert_called_once_with(url="https://login.unimicro.no/.well-known/openid-configuration")
+    assert token_endpoint == "https://login.unimicro.no/connect/token"
