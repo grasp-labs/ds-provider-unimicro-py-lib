@@ -54,7 +54,7 @@ class UnimicroLinkedServiceSettings(HttpLinkedServiceSettings):
     """
 
     certificate: str = field(metadata={"mask": True})
-    """The certificate used for authenticating with the Unimicro API."""
+    """Base64-encoded PKCS#12 certificate used for authentication."""
 
     p12_password: str = field(metadata={"mask": True})
     """The password for the p12 certificate used for authenticating with the Unimicro API."""
@@ -115,16 +115,16 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
             **(self.settings.headers or {}),
             "CompanyKey": self.settings.company_key,
         }
-        token_endpoint = self._get_token_endpoint()
-        client_token = self._create_client_token(client_id=self.settings.client_id, private_key=self._get_private_key())
-        data = {
-            "grant_type": "client_credentials",
-            "scope": "Accounting.Admin AppFramework Payroll.Admin READ_ONLY Sales.Admin Webhook.Admin",
-            "client_id": self.settings.client_id,
-            "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-            "client_assertion": client_token,
-        }
         if self.settings.auth_type == AuthType.CUSTOM:
+            token_endpoint = self._get_token_endpoint()
+            client_token = self._create_client_token(client_id=self.settings.client_id, private_key=self._get_private_key())
+            data = {
+                "grant_type": "client_credentials",
+                "scope": "Accounting.Admin AppFramework Payroll.Admin READ_ONLY Sales.Admin Webhook.Admin",
+                "client_id": self.settings.client_id,
+                "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                "client_assertion": client_token,
+            }
             self.settings.custom = CustomAuthSettings(token_endpoint=token_endpoint, data=data)
         super().__post_init__()
 
@@ -136,25 +136,27 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
         Returns:
             RSAPrivateKey: The private key used for authentication.
         """
-        certificate_b64 = base64.b64decode(self.settings.certificate)
-        if certificate_b64.startswith(b'"') and certificate_b64.endswith(b'"'):
-            certificate_b64 = certificate_b64[1:-1]
-
         try:
-            decoded_certificate = base64.b64decode(certificate_b64)
+            certificate = self.settings.certificate.strip('"')
+            decoded_certificate = base64.b64decode(certificate)
         except Exception as exc:
             logger.error("Failed to base64-decode certificate: %s", exc)
             raise AuthenticationError(
                 message="Failed to base64-decode certificate.",
-                details={
-                    "company_key": self.settings.company_key,
-                },
+                details={"company_key": self.settings.company_key},
             ) from exc
 
         p12_password = self.settings.p12_password
         password_bytes = p12_password.encode("utf-8") if p12_password else None
 
-        private_key, _cert, _chain = pkcs12.load_key_and_certificates(decoded_certificate, password_bytes)
+        try:
+            private_key, _cert, _chain = pkcs12.load_key_and_certificates(decoded_certificate, password_bytes)
+        except (ValueError, TypeError) as exc:
+            logger.error("Failed to load private key from .p12 file: %s", exc)
+            raise AuthenticationError(
+                message="Failed to load private key from .p12 file.",
+                details={"company_key": self.settings.company_key},
+            ) from exc
 
         if not isinstance(private_key, RSAPrivateKey):
             logger.error("No RSA private key found in the .p12 file.")

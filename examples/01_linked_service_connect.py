@@ -10,7 +10,7 @@ It includes the necessary settings for authentication and
 connection to the Unimicro API.
 
 Prerequisites:
-    Set environment variables for PowerOfficeGo API authentication:
+    Set environment variables for Unimicro authentication:
     - `UNIMICRO_CLIENT_ID`: Your Unimicro client ID.
     - `UNIMICRO_COMPANY_KEY`: Your Unimicro company key.
     - `UNIMICRO_CERTIFICATE`: Your base64-encoded Unimicro certificate.

@@ -10,10 +10,13 @@ Example:
     >>> from uuid import UUID
     >>> linked_service = UnimicroLinkedService(
     ...     id=UUID("12345678-1234-5678-1234-1234567890ab"),
-    ...     name="pogo-linked-service",
+    ...     name="unimicro-linked-service",
     ...     version="v1.0.0",
     ...     settings=UnimicroLinkedServiceSettings(
     ...         company_key="my-company-id",
+    ...         client_id="my-client-id",
+    ...         certificate="my-certificate",
+    ...         p12_password="my-p12-password",
     ...     ),
     ... )
     >>> linked_service.connect()

@@ -43,12 +43,8 @@ def make_certificate(
         encryption_algorithm=NoEncryption(),
     )
 
-    encoded_certificate = base64.b64encode(p12_data)
-
-    if quoted:
-        encoded_certificate = b'"' + encoded_certificate + b'"'
-
-    return base64.b64encode(encoded_certificate).decode("ascii")
+    certificate = base64.b64encode(p12_data).decode("ascii")
+    return f'"{certificate}"' if quoted else certificate
 
 
 def make_settings(certificate: str) -> UnimicroLinkedServiceSettings:
@@ -168,7 +164,7 @@ def test_raises_authentication_error_when_certificate_decoding_fails() -> None:
         patch.object(
             base64,
             "b64decode",
-            side_effect=[b"certificate", ValueError("invalid certificate")],
+            side_effect=ValueError("invalid certificate"),
         ),
         pytest.raises(AuthenticationError, match="Failed to base64-decode certificate"),
     ):
