@@ -85,7 +85,7 @@ def test_creates_valid_client_token() -> None:
     private_key = generate_private_key(public_exponent=65537, key_size=2048)
     service = make_service(make_settings(make_certificate(private_key)))
 
-    token = service._create_client_token("client-id", private_key)
+    token = service._create_client_token("client-id", private_key, "https://login.unimicro.no/connect/token")
 
     claims = jwt.decode(
         token,

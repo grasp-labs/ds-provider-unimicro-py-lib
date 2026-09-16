@@ -117,7 +117,9 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
         }
         if self.settings.auth_type == AuthType.CUSTOM:
             token_endpoint = self._get_token_endpoint()
-            client_token = self._create_client_token(client_id=self.settings.client_id, private_key=self._get_private_key())
+            client_token = self._create_client_token(
+                client_id=self.settings.client_id, private_key=self._get_private_key(), token_endpoint=token_endpoint
+            )
             data = {
                 "grant_type": "client_credentials",
                 "scope": "Accounting.Admin AppFramework Payroll.Admin READ_ONLY Sales.Admin Webhook.Admin",
@@ -169,13 +171,14 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
 
         return private_key
 
-    def _create_client_token(self, client_id: str, private_key: RSAPrivateKey) -> str:
+    def _create_client_token(self, client_id: str, private_key: RSAPrivateKey, token_endpoint: str) -> str:
         """
         Create a client token for the Unimicro API using the provided client ID and private key.
 
         Args:
             client_id (str): The client ID for the Unimicro API.
             private_key (RSAPrivateKey): The private key used for authentication.
+            token_endpoint (str): The token endpoint URL for the Unimicro API.
 
         Returns:
             str: The generated client token.
@@ -190,7 +193,7 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
             "nbf": int(now.timestamp()),
             "exp": int(exp.timestamp()),
             "iss": client_id,
-            "aud": f"{self.settings.auth_url}/connect/token",
+            "aud": token_endpoint,
         }
 
         token = jwt.encode(payload, private_key, algorithm="RS256")
