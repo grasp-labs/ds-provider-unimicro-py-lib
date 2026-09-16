@@ -62,7 +62,7 @@ class UnimicroLinkedServiceSettings(HttpLinkedServiceSettings):
     client_id: str = field(metadata={"mask": True})
     """The client ID for the Unimicro API."""
 
-    company_key: str = field(metadata={"mask": True})
+    company_key: str
     """The company key used for fetching data from Unimicro."""
 
     auth_url: str = "https://login.unimicro.no"
