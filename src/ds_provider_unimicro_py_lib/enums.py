@@ -14,3 +14,4 @@ class ResourceType(StrEnum):
     """
 
     UNIMICRO_LINKED_SERVICE = "ds.resource.linked-service.unimicro"
+    UNIMICRO_DATASET = "ds.resource.dataset.unimicro"
