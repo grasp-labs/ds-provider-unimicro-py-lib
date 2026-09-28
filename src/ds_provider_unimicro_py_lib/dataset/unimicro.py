@@ -10,6 +10,7 @@ Example:
 
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
+from urllib.parse import urlencode
 
 import pandas as pd
 from ds_common_logger_py_lib import Logger
@@ -47,26 +48,6 @@ class UnimicroReadSettings:
 
 
 @dataclass(kw_only=True)
-class UnimicroUpdateSettings:
-    """
-    Update settings specific to the Unimicro provider.
-    """
-
-    id: int
-    """The unique identifier of the record to update in the Unimicro dataset."""
-
-
-@dataclass(kw_only=True)
-class UnimicroDeleteSettings:
-    """
-    Delete settings specific to the Unimicro provider.
-    """
-
-    id: int
-    """The unique identifier of the record to delete in the Unimicro dataset."""
-
-
-@dataclass(kw_only=True)
 class UnimicroDatasetSettings(DatasetSettings):
     """
     Dataset settings specific to the Unimicro provider.
@@ -77,12 +58,6 @@ class UnimicroDatasetSettings(DatasetSettings):
 
     read: UnimicroReadSettings = field(default_factory=UnimicroReadSettings)
     """Read settings for the Unimicro dataset."""
-
-    update: UnimicroUpdateSettings
-    """Update settings for the Unimicro dataset."""
-
-    delete: UnimicroDeleteSettings
-    """Delete settings for the Unimicro dataset."""
 
 
 UnimicroDatasetSettingsType = TypeVar("UnimicroDatasetSettingsType", bound=UnimicroDatasetSettings)
@@ -188,8 +163,8 @@ class UnimicroDataset(
             logger.info(f"Resuming from checkpoint with from_date: {self.checkpoint['incremental']['value']}")
             last_modified_date = self.checkpoint["incremental"]["value"]
 
-        records_to_skip = self.checkpoint.get("pagination", {}).get("value", 0) if self.checkpoint else 0
-        # TODO: Add a good logging statement for records_to_skip
+        starting_records_to_skip = self.checkpoint.get("pagination", {}).get("value", 0) if self.checkpoint else 0
+        logger.info(f"Starting pagination from record number: {starting_records_to_skip}.")
 
         all_records: list[dict[str, Any]] = []
 
@@ -197,7 +172,7 @@ class UnimicroDataset(
 
         try:
             while True:
-                records_to_skip += successfully_fetched_records
+                records_to_skip = starting_records_to_skip + successfully_fetched_records
                 url = self._build_url_with_filters(
                     page_size=self.settings.read.page_size,
                     records_to_skip=records_to_skip,
@@ -301,9 +276,9 @@ class UnimicroDataset(
             str: The constructed filter string.
         """
         base_url = self._build_url()
-        url = f"{base_url}?top={page_size}"
+        query_params: dict[str, str | int] = {"top": page_size}
         if records_to_skip is not None:
-            url += f"&skip={records_to_skip}"
+            query_params["skip"] = records_to_skip
         if self.settings.read.fields:
             selected_fields = set(self.settings.read.fields)
             # Add check on if CreatedAt and UpdatedAt fields are included in the selected fields
@@ -311,7 +286,7 @@ class UnimicroDataset(
                 selected_fields.add("CreatedAt")
             if "UpdatedAt" not in selected_fields:
                 selected_fields.add("UpdatedAt")
-            url += f"&select={','.join(selected_fields)}"
+            query_params["select"] = ",".join(selected_fields)
 
         filter_clauses = []
         if last_modified_date:
@@ -320,9 +295,9 @@ class UnimicroDataset(
             filter_clauses.append(self.settings.read.filters)
 
         if filter_clauses:
-            url += f"&filter={' and '.join(filter_clauses)}"
+            query_params["filter"] = " and ".join(filter_clauses)
 
-        return url
+        return f"{base_url}?{urlencode(query_params)}"
 
     def _build_url(self) -> str:
         """
@@ -331,6 +306,15 @@ class UnimicroDataset(
         Returns:
             str: The constructed URL.
         """
-        base_url = self.linked_service.settings.host.rstrip("/") + "/"
+        base_url = self.linked_service.settings.host.rstrip("/")
         url = f"{base_url}/api/biz/{self.settings.data_product}"
+        if self.settings.read.id:
+            url += f"/{self.settings.read.id}"
         return url
+
+    def close(self) -> None:
+        """
+        Release any resources held by the dataset.
+
+        Connection lifecycle is managed by the linked service.
+        """
