@@ -16,7 +16,7 @@ Example:
     ...         company_key="my-company-id",
     ...         client_id="my-client-id",
     ...         certificate="my-certificate",
-    ...         p12_password="my-p12-password",
+    ...         certificate_password="my-certificate-password",
     ...     ),
     ... )
     >>> linked_service.connect()

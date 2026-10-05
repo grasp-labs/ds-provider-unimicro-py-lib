@@ -14,7 +14,7 @@ Prerequisites:
     - `UNIMICRO_CLIENT_ID`: Your Unimicro client ID.
     - `UNIMICRO_COMPANY_KEY`: Your Unimicro company key.
     - `UNIMICRO_CERTIFICATE`: Your base64-encoded Unimicro certificate.
-    - `UNIMICRO_P12_PASSWORD`: Your Unimicro PKCS#12 password.
+    - `UNIMICRO_CERTIFICATE_PASSWORD`: Your Unimicro PKCS#12 password.
 """
 
 from __future__ import annotations

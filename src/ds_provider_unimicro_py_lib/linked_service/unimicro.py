@@ -146,7 +146,7 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
     def _get_private_key(self) -> RSAPrivateKey:
         """
         Get the private key used for authenticating with the Unimicro API.
-        The certificate and certificate password is used to generate the private key for authentication.
+        The certificate and certificate password are used to generate the private key for authentication.
 
         Returns:
             RSAPrivateKey: The private key used for authentication.

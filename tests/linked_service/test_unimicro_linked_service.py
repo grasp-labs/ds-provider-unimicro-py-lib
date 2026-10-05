@@ -37,7 +37,7 @@ def make_certificate(
     private_key: RSAPrivateKey | EllipticCurvePrivateKey,
     quoted: bool = False,
 ) -> str:
-    p12_data = pkcs12.serialize_key_and_certificates(
+    certificate_data = pkcs12.serialize_key_and_certificates(
         name=b"unimicro-client",
         key=private_key,
         cert=None,
@@ -45,7 +45,7 @@ def make_certificate(
         encryption_algorithm=NoEncryption(),
     )
 
-    certificate = base64.b64encode(p12_data).decode("ascii")
+    certificate = base64.b64encode(certificate_data).decode("ascii")
     return f'"{certificate}"' if quoted else certificate
 
 
@@ -235,6 +235,7 @@ def test_gets_token_endpoint() -> None:
 def test_connect_sends_form_encoded_custom_auth_request() -> None:
     private_key = generate_private_key(public_exponent=65537, key_size=2048)
     settings = make_settings(make_certificate(private_key))
+    settings.company_key = "company-key"
     service = make_service(settings)
 
     response = Mock()
@@ -250,4 +251,5 @@ def test_connect_sends_form_encoded_custom_auth_request() -> None:
         timeout=30,
         data=service.settings.custom.data,
     )
+    assert service.connection.session.headers["CompanyKey"] == "company-key"
     assert "Content-Type" not in service.connection.session.headers
