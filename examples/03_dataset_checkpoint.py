@@ -11,6 +11,7 @@ This example demonstrates:
 - Handle pagination when reading data.
 - Demonstrates using checkpoints for incremental data loads.
 """
+
 import logging
 import os
 from uuid import uuid4
@@ -56,7 +57,7 @@ def main() -> None:
         company_key=company_key,
         read=UnimicroReadSettings(
             page_size=1000,
-        )
+        ),
     )
     dataset = UnimicroDataset(
         id=uuid4(),
