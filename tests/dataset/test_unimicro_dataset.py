@@ -40,6 +40,21 @@ def make_response(records):
     return response
 
 
+def test_read_settings_deserialize_from_nested_payload():
+    settings = UnimicroDatasetSettings.deserialize(
+        {
+            "data_product": "Customers",
+            "company_key": "test-company-key",
+            "read": {"page_size": 50, "fields": ["Name"], "filters": "Status eq 'Open'"},
+        }
+    )
+
+    assert isinstance(settings.read, UnimicroReadSettings)
+    assert settings.read.page_size == 50
+    assert settings.read.fields == ["Name"]
+    assert settings.read.filters == "Status eq 'Open'"
+
+
 def test_dataset_type_and_checkpoint_support():
     dataset = make_dataset()
 

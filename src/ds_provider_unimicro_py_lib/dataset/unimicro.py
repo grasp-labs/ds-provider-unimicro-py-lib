@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 
 import pandas as pd
 from ds_common_logger_py_lib import Logger
+from ds_common_serde_py_lib import Serializable
 from ds_resource_plugin_py_lib.common.resource.dataset import DatasetSettings, DatasetStorageFormatType, TabularDataset
 from ds_resource_plugin_py_lib.common.resource.dataset.errors import (
     ReadError,
@@ -29,7 +30,7 @@ logger = Logger.get_logger(__name__, package=True)
 
 
 @dataclass(kw_only=True)
-class UnimicroReadSettings:
+class UnimicroReadSettings(Serializable):
     """
     Read settings specific to the Unimicro provider.
     """
