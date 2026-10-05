@@ -1,0 +1,18 @@
+package-name: unimicro
+name: unimicro
+description: Unimicro provider for the DS Business Workflow
+
+
+linked-service:
+  - name: Unimicro
+    type: ds.resource.linked-service.unimicro
+    version: 1.0.0
+    description: Unimicro linked service
+    class_name: ds_provider_unimicro_py_lib.linked_service.UnimicroLinkedService
+
+dataset:
+  - name: Unimicro
+    type: ds.resource.dataset.unimicro
+    version: 1.0.0
+    description: Unimicro dataset
+    class_name: ds_provider_unimicro_py_lib.dataset.unimicro.UnimicroDataset
