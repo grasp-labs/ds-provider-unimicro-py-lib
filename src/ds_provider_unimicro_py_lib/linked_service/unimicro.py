@@ -62,8 +62,11 @@ class UnimicroLinkedServiceSettings(HttpLinkedServiceSettings):
     client_id: str = field(metadata={"mask": True})
     """The client ID for the Unimicro API."""
 
-    company_key: str
+    company_key: str | None = None
     """The company key used for fetching data from Unimicro."""
+
+    scope: str = "AppFramework"
+    """The scope for the Unimicro API authentication."""
 
     auth_url: str = "https://login.unimicro.no"
     """The URL for the Unimicro authentication service used for authentication."""
@@ -113,7 +116,6 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
         """
         self.settings.headers = {
             **(self.settings.headers or {}),
-            "CompanyKey": self.settings.company_key,
         }
         if self.settings.auth_type == AuthType.CUSTOM:
             token_endpoint = self._get_token_endpoint()
@@ -122,7 +124,7 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
             )
             data = {
                 "grant_type": "client_credentials",
-                "scope": "AppFramework",
+                "scope": self.settings.scope,
                 "client_id": self.settings.client_id,
                 "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
                 "client_assertion": client_token,

@@ -54,7 +54,6 @@ def make_settings(certificate: str) -> UnimicroLinkedServiceSettings:
         certificate=certificate,
         p12_password="",
         client_id="client-id",
-        company_key="company-key",
     )
 
 
@@ -119,7 +118,6 @@ def test_configures_company_key_and_custom_auth() -> None:
     ):
         service = make_service(settings)
 
-    assert service.settings.headers == {"CompanyKey": "company-key"}
     assert service.settings.auth_type == AuthType.CUSTOM
     assert service.settings.custom is not None
     assert service.settings.custom.token_endpoint == "https://login.unimicro.no/connect/token"
@@ -150,7 +148,6 @@ def test_does_not_configure_custom_auth_for_no_auth() -> None:
         service = make_service(settings)
 
     assert service.settings.custom is None
-    assert service.settings.headers == {"CompanyKey": "company-key"}
 
 
 def test_raises_authentication_error_when_certificate_decoding_fails() -> None:
@@ -253,6 +250,4 @@ def test_connect_sends_form_encoded_custom_auth_request() -> None:
         timeout=30,
         data=service.settings.custom.data,
     )
-    assert settings.headers == {"CompanyKey": "company-key"}
-    assert service.connection.session.headers["CompanyKey"] == "company-key"
     assert "Content-Type" not in service.connection.session.headers
