@@ -52,7 +52,7 @@ def make_certificate(
 def make_settings(certificate: str) -> UnimicroLinkedServiceSettings:
     return UnimicroLinkedServiceSettings(
         certificate=certificate,
-        p12_password="",
+        certificate_password="",
         client_id="client-id",
     )
 
@@ -180,7 +180,7 @@ def test_raises_authentication_error_when_pkcs12_loading_fails() -> None:
         ),
         pytest.raises(
             AuthenticationError,
-            match=r"Failed to load private key from \.p12 file\.",
+            match=r"Failed to load private key from the certificate\.",
         ),
     ):
         service._get_private_key()
