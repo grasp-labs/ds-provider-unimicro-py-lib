@@ -43,6 +43,9 @@ Repository = "https://github.com/grasp-labs/ds-provider-unimicro-py-lib/"
 Issues = "https://github.com/grasp-labs/ds-provider-unimicro-py-lib/issues/"
 Changelog = "https://github.com/grasp-labs/ds-provider-unimicro-py-lib/releases"
 
+[project.entry-points."ds.providers"]
+unimicro = "ds_provider_unimicro_py_lib"
+
 [project.optional-dependencies]
 dev = [
     "ruff>=0.1.8",
