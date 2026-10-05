@@ -56,6 +56,9 @@ class UnimicroDatasetSettings(DatasetSettings):
     data_product: str
     """The specific data product within the Unimicro provider."""
 
+    company_key: str
+    """The company key used for fetching data from the Unimicro provider."""
+
     read: UnimicroReadSettings = field(default_factory=UnimicroReadSettings)
     """Read settings for the Unimicro dataset."""
 
@@ -179,7 +182,7 @@ class UnimicroDataset(
                     last_modified_date=last_modified_date,
                 )
                 logger.debug(f"Making API request to {url}.")
-                response = session.get(url)
+                response = session.get(url, headers={"CompanyKey": self.settings.company_key})
                 data = response.json()
 
                 all_records.extend(data)

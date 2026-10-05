@@ -1,14 +1,15 @@
 """
-**File:** ``02_dataset_read.py``
-**Region:** ``examples/02_dataset_read.py``
+**File:** ``03_dataset_checkpoint.py``
+**Region:** ``examples/03_dataset_checkpoint.py``
 
-Example 02: Reading data from Unimicro.
+Example 03: Reading data from Unimicro with checkpoint support.
 
 This example demonstrates:
 - Creating a Unimicro and connecting.
 - Creating a Dataset for a data product.
 - Reading customer data from Unimicro.
 - Handle pagination when reading data.
+- Demonstrates using checkpoints for incremental data loads.
 """
 import logging
 import os
@@ -29,6 +30,11 @@ def main() -> None:
     certificate = os.getenv("UNIMICRO_CERTIFICATE", "your-base64-encoded-certificate")
     certificate_password = os.getenv("UNIMICRO_CERTIFICATE_PASSWORD", "your-certificate-password")
 
+    checkpoint = {
+        "incremental": {"value": "2025-01-19T22:20:00+00:00"},
+        "pagination": {"value": 0},
+    }
+
     # Create linked service settings
     settings = UnimicroLinkedServiceSettings(
         client_id=client_id,
@@ -47,9 +53,8 @@ def main() -> None:
     # Create a Dataset for a data product customer
     dataset_settings = UnimicroDatasetSettings(
         data_product="Customers",
-        company_key=company_key,
         read=UnimicroReadSettings(
-            page_size=100,
+            page_size=1000,
         )
     )
     dataset = UnimicroDataset(
@@ -58,6 +63,7 @@ def main() -> None:
         version="v1.0.0",
         linked_service=linked_service,
         settings=dataset_settings,
+        checkpoint=checkpoint,
     )
 
     try:

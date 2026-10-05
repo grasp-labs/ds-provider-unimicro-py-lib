@@ -21,6 +21,7 @@ def make_dataset(*, fields=None, filters=None, record_id=None, checkpoint=None):
     dataset = object.__new__(UnimicroDataset)
     dataset.settings = UnimicroDatasetSettings(
         data_product="Customers",
+        company_key="test-company-key",
         read=UnimicroReadSettings(
             id=record_id,
             page_size=2,
