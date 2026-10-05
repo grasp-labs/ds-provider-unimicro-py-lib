@@ -10,6 +10,7 @@ This example demonstrates:
 - Reading customer data from Unimicro.
 - Handle pagination when reading data.
 """
+
 import logging
 import os
 from uuid import uuid4
@@ -50,7 +51,7 @@ def main() -> None:
         company_key=company_key,
         read=UnimicroReadSettings(
             page_size=100,
-        )
+        ),
     )
     dataset = UnimicroDataset(
         id=uuid4(),
