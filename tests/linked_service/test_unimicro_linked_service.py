@@ -26,6 +26,7 @@ from ds_resource_plugin_py_lib.common.resource.linked_service.errors import (
     AuthenticationError,
 )
 
+from ds_provider_unimicro_py_lib.enums import ResourceType
 from ds_provider_unimicro_py_lib.linked_service.unimicro import (
     UnimicroLinkedService,
     UnimicroLinkedServiceSettings,
@@ -36,7 +37,7 @@ def make_certificate(
     private_key: RSAPrivateKey | EllipticCurvePrivateKey,
     quoted: bool = False,
 ) -> str:
-    p12_data = pkcs12.serialize_key_and_certificates(
+    certificate_data = pkcs12.serialize_key_and_certificates(
         name=b"unimicro-client",
         key=private_key,
         cert=None,
@@ -44,16 +45,15 @@ def make_certificate(
         encryption_algorithm=NoEncryption(),
     )
 
-    certificate = base64.b64encode(p12_data).decode("ascii")
+    certificate = base64.b64encode(certificate_data).decode("ascii")
     return f'"{certificate}"' if quoted else certificate
 
 
 def make_settings(certificate: str) -> UnimicroLinkedServiceSettings:
     return UnimicroLinkedServiceSettings(
         certificate=certificate,
-        p12_password="",
+        certificate_password="",
         client_id="client-id",
-        company_key="company-key",
     )
 
 
@@ -118,7 +118,6 @@ def test_configures_company_key_and_custom_auth() -> None:
     ):
         service = make_service(settings)
 
-    assert service.settings.headers == {"CompanyKey": "company-key"}
     assert service.settings.auth_type == AuthType.CUSTOM
     assert service.settings.custom is not None
     assert service.settings.custom.token_endpoint == "https://login.unimicro.no/connect/token"
@@ -149,7 +148,6 @@ def test_does_not_configure_custom_auth_for_no_auth() -> None:
         service = make_service(settings)
 
     assert service.settings.custom is None
-    assert service.settings.headers == {"CompanyKey": "company-key"}
 
 
 def test_raises_authentication_error_when_certificate_decoding_fails() -> None:
@@ -182,7 +180,7 @@ def test_raises_authentication_error_when_pkcs12_loading_fails() -> None:
         ),
         pytest.raises(
             AuthenticationError,
-            match=r"Failed to load private key from \.p12 file\.",
+            match=r"Failed to load private key from the certificate\.",
         ),
     ):
         service._get_private_key()
@@ -232,3 +230,26 @@ def test_gets_token_endpoint() -> None:
 
     get.assert_called_once_with(url="https://login.unimicro.no/.well-known/openid-configuration")
     assert token_endpoint == "https://login.unimicro.no/connect/token"
+
+
+def test_connect_sends_form_encoded_custom_auth_request() -> None:
+    private_key = generate_private_key(public_exponent=65537, key_size=2048)
+    settings = make_settings(make_certificate(private_key))
+    settings.company_key = "company-key"
+    service = make_service(settings)
+
+    response = Mock()
+    response.json.return_value = {"access_token": "test-access-token"}
+
+    with patch.object(Http, "post", return_value=response) as post:
+        service.connect()
+
+    assert service.type == ResourceType.UNIMICRO_LINKED_SERVICE
+    post.assert_called_once_with(
+        url="https://login.unimicro.no/connect/token",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+        data=service.settings.custom.data,
+    )
+    assert service.connection.session.headers["CompanyKey"] == "company-key"
+    assert "Content-Type" not in service.connection.session.headers

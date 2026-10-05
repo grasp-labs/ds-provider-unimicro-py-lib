@@ -14,7 +14,7 @@ Prerequisites:
     - `UNIMICRO_CLIENT_ID`: Your Unimicro client ID.
     - `UNIMICRO_COMPANY_KEY`: Your Unimicro company key.
     - `UNIMICRO_CERTIFICATE`: Your base64-encoded Unimicro certificate.
-    - `UNIMICRO_P12_PASSWORD`: Your Unimicro PKCS#12 password.
+    - `UNIMICRO_CERTIFICATE_PASSWORD`: Your Unimicro PKCS#12 password.
 """
 
 from __future__ import annotations
@@ -33,16 +33,14 @@ logger = Logger.get_logger(__name__)
 def main() -> None:
     # Load settings from environment variables
     client_id = os.getenv("UNIMICRO_CLIENT_ID", "your-client-id")
-    company_key = os.getenv("UNIMICRO_COMPANY_KEY", "your-company-key")
     certificate = os.getenv("UNIMICRO_CERTIFICATE", "your-base64-encoded-certificate")
-    p12_password = os.getenv("UNIMICRO_P12_PASSWORD", "your-p12-password")
+    certificate_password = os.getenv("UNIMICRO_CERTIFICATE_PASSWORD", "your-certificate-password")
 
     # Create linked service settings
     settings = UnimicroLinkedServiceSettings(
         client_id=client_id,
-        company_key=company_key,
         certificate=certificate,
-        p12_password=p12_password,
+        certificate_password=certificate_password,
     )
 
     # Create linked service instance

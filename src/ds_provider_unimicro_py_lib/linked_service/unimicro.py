@@ -56,14 +56,17 @@ class UnimicroLinkedServiceSettings(HttpLinkedServiceSettings):
     certificate: str = field(metadata={"mask": True})
     """Base64-encoded PKCS#12 certificate used for authentication."""
 
-    p12_password: str = field(metadata={"mask": True})
-    """The password for the p12 certificate used for authenticating with the Unimicro API."""
+    certificate_password: str = field(metadata={"mask": True})
+    """The password for the certificate used for authenticating with the Unimicro API."""
 
-    client_id: str = field(metadata={"mask": True})
+    client_id: str
     """The client ID for the Unimicro API."""
 
-    company_key: str
+    company_key: str | None = None
     """The company key used for fetching data from Unimicro."""
+
+    scope: str = "AppFramework"
+    """The scope for the Unimicro API authentication."""
 
     auth_url: str = "https://login.unimicro.no"
     """The URL for the Unimicro authentication service used for authentication."""
@@ -113,7 +116,6 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
         """
         self.settings.headers = {
             **(self.settings.headers or {}),
-            "CompanyKey": self.settings.company_key,
         }
         if self.settings.auth_type == AuthType.CUSTOM:
             token_endpoint = self._get_token_endpoint()
@@ -122,7 +124,7 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
             )
             data = {
                 "grant_type": "client_credentials",
-                "scope": "Accounting.Admin AppFramework Payroll.Admin READ_ONLY Sales.Admin Webhook.Admin",
+                "scope": self.settings.scope,
                 "client_id": self.settings.client_id,
                 "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
                 "client_assertion": client_token,
@@ -130,10 +132,25 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
             self.settings.custom = CustomAuthSettings(token_endpoint=token_endpoint, data=data)
         super().__post_init__()
 
+    def _configure_custom_auth(self, http: Http) -> None:
+        original_headers = self.settings.headers
+        self.settings.headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        try:
+            super()._configure_custom_auth(http)
+        finally:
+            self.settings.headers = original_headers
+
+        if self.settings.company_key:
+            company_header = {"CompanyKey": self.settings.company_key}
+            self.settings.headers = {**(original_headers or {}), **company_header}
+            http.session.headers.update(company_header)
+
     def _get_private_key(self) -> RSAPrivateKey:
         """
         Get the private key used for authenticating with the Unimicro API.
-        The certificate and p12 password is used to generate the private key for authentication.
+        The certificate and certificate password are used to generate the private key for authentication.
 
         Returns:
             RSAPrivateKey: The private key used for authentication.
@@ -148,22 +165,22 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
                 details={"company_key": self.settings.company_key},
             ) from exc
 
-        p12_password = self.settings.p12_password
-        password_bytes = p12_password.encode("utf-8") if p12_password else None
+        certificate_password = self.settings.certificate_password
+        password_bytes = certificate_password.encode("utf-8") if certificate_password else None
 
         try:
             private_key, _cert, _chain = pkcs12.load_key_and_certificates(decoded_certificate, password_bytes)
         except (ValueError, TypeError) as exc:
-            logger.error("Failed to load private key from .p12 file: %s", exc)
+            logger.error("Failed to load private key from the certificate: %s", exc)
             raise AuthenticationError(
-                message="Failed to load private key from .p12 file.",
+                message="Failed to load private key from the certificate.",
                 details={"company_key": self.settings.company_key},
             ) from exc
 
         if not isinstance(private_key, RSAPrivateKey):
-            logger.error("No RSA private key found in the .p12 file.")
+            logger.error("No RSA private key found in the certificate.")
             raise AuthenticationError(
-                message="The .p12 file does not contain an RSA private key.",
+                message="The certificate does not contain an RSA private key.",
                 details={
                     "company_key": self.settings.company_key,
                 },
