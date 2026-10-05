@@ -53,6 +53,7 @@ def main() -> None:
     # Create a Dataset for a data product customer
     dataset_settings = UnimicroDatasetSettings(
         data_product="Customers",
+        company_key=company_key,
         read=UnimicroReadSettings(
             page_size=1000,
         )

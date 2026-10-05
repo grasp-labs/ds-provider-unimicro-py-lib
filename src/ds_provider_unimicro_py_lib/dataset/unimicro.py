@@ -91,27 +91,34 @@ class UnimicroDataset(
     @property
     def supports_checkpoint(self) -> bool:
         """
-        Whether this provider supports incremental loads via ``self.checkpoint``.
+        Whether this provider supports checkpointing for incremental reads.
 
-        The checkpoint is a dictionary that tracks pagination and incremental state:
+        The checkpoint has this structure::
 
-        - On a full load, ``self.checkpoint`` is expected to be empty (``{}``) or ``None``.
-          In this case, :meth:`read` starts from page ``1``.
-        - After each successfully read page, ``self.checkpoint`` is updated with at least ``{"last_page": page, ...}``.
-        - If incremental loading is possible (i.e., the data contains a ``lastChangedDateTimeOffset`` field),
-          the checkpoint will also include an ``incremental`` key with the latest observed value:
-           ``{"incremental": {"last_modified_date": ...}}``.
-        - On a subsequent run, if ``self.checkpoint`` contains a ``"last_page"`` entry,
-          :meth:`read` resumes from ``last_page + 1`` and continues fetching data from the PowerOfficeGo API.
-        - If ``self.checkpoint`` contains an ``incremental`` key, the loader will use the stored ``last_modified_date``
-          to filter for new/changed records.
+            {
+                "incremental": {"value": <timestamp or None>},
+                "pagination": {"value": <record offset>},
+            }
 
-        This allows consumers to perform incremental loads by persisting and reusing
-        the checkpoint between executions, avoiding re-reading pages that were already processed successfully.
-        The checkpoint structure is designed to support both paginated and incremental (watermark-based) loading.
+        During a read, ``pagination.value`` is used as the initial API ``skip``
+        offset (defaulting to 0). Pagination is handled within the read call:
+        each subsequent request skips the initial offset plus the number of
+        records already fetched during that call.
+
+        When ``incremental.value`` is set, requests filter for records whose
+        ``CreatedAt`` or ``UpdatedAt`` timestamp is greater than that value.
+        After a successful read, the checkpoint is replaced with the latest
+        valid timestamp found in the returned records, and ``pagination.value``
+        is reset to 0. If no valid timestamps are found, the incremental value
+        is None.
+
+        If a request fails, the checkpoint is updated with the number of
+        records fetched during that read attempt and retains the prior
+        incremental value. Consumers should persist checkpoints separately for
+        each dataset and company.
 
         Returns:
-            bool: True if checkpointing is supported, False otherwise.
+            bool: True, because this provider supports incremental checkpointing.
         """
         return True
 
@@ -194,7 +201,7 @@ class UnimicroDataset(
 
         except Exception as exc:
             logger.error(f"Error occurred while fetching data: {exc}")
-            self.checkpoint = self._build_checkpoint(successfully_fetched_records, last_modified_date)
+            self.checkpoint = self._build_checkpoint(starting_records_to_skip, last_modified_date)
             raise ReadError(
                 message=f"Error occurred while fetching data: {exc}",
                 details={
@@ -210,12 +217,19 @@ class UnimicroDataset(
             # find the greatest incremental value
             greatest_incremental_value = self.greatest_incremental_value(self.output)
             # remove CreatedAt and/or UpdatedAt columns from the dataframe if fields are defined in the settings
-            if self.settings.read.fields and (
-                "CreatedAt" not in self.settings.read.fields or "UpdatedAt" not in self.settings.read.fields
-            ):
-                self.output.drop(columns=[col for col in ("CreatedAt", "UpdatedAt") if col in self.output.columns], inplace=True)
+            if self.settings.read.fields:
+                selected_fields = set(self.settings.read.fields)
+                self.output.drop(
+                    columns=[
+                        col for col in ("CreatedAt", "UpdatedAt") if col in self.output.columns and col not in selected_fields
+                    ],
+                    inplace=True,
+                )
             # build checkpoint
-            self.checkpoint = self._build_checkpoint(last_loaded_records=0, last_modified_date=greatest_incremental_value)
+            self.checkpoint = self._build_checkpoint(
+                last_loaded_records=0,
+                last_modified_date=greatest_incremental_value or last_modified_date,
+            )
 
     def greatest_incremental_value(self, all_records: pd.DataFrame) -> str | None:
         """
