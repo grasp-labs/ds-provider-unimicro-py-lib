@@ -116,7 +116,6 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
         """
         self.settings.headers = {
             **(self.settings.headers or {}),
-            "CompanyKey": self.settings.company_key if self.settings.company_key else "",
         }
         if self.settings.auth_type == AuthType.CUSTOM:
             token_endpoint = self._get_token_endpoint()
@@ -142,6 +141,11 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
             super()._configure_custom_auth(http)
         finally:
             self.settings.headers = original_headers
+
+        if self.settings.company_key:
+            company_header = {"CompanyKey": self.settings.company_key}
+            self.settings.headers = {**(original_headers or {}), **company_header}
+            http.session.headers.update(company_header)
 
     def _get_private_key(self) -> RSAPrivateKey:
         """
