@@ -26,6 +26,7 @@ from ds_resource_plugin_py_lib.common.resource.linked_service.errors import (
     AuthenticationError,
 )
 
+from ds_provider_unimicro_py_lib.enums import ResourceType
 from ds_provider_unimicro_py_lib.linked_service.unimicro import (
     UnimicroLinkedService,
     UnimicroLinkedServiceSettings,
@@ -232,3 +233,26 @@ def test_gets_token_endpoint() -> None:
 
     get.assert_called_once_with(url="https://login.unimicro.no/.well-known/openid-configuration")
     assert token_endpoint == "https://login.unimicro.no/connect/token"
+
+
+def test_connect_sends_form_encoded_custom_auth_request() -> None:
+    private_key = generate_private_key(public_exponent=65537, key_size=2048)
+    settings = make_settings(make_certificate(private_key))
+    service = make_service(settings)
+
+    response = Mock()
+    response.json.return_value = {"access_token": "test-access-token"}
+
+    with patch.object(Http, "post", return_value=response) as post:
+        service.connect()
+
+    assert service.type == ResourceType.UNIMICRO_LINKED_SERVICE
+    post.assert_called_once_with(
+        url="https://login.unimicro.no/connect/token",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+        data=service.settings.custom.data,
+    )
+    assert settings.headers == {"CompanyKey": "company-key"}
+    assert service.connection.session.headers["CompanyKey"] == "company-key"
+    assert "Content-Type" not in service.connection.session.headers

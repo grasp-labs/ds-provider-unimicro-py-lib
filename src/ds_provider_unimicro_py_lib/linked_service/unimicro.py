@@ -122,13 +122,23 @@ class UnimicroLinkedService(HttpLinkedService[UnimicroLinkedServiceSettingsType]
             )
             data = {
                 "grant_type": "client_credentials",
-                "scope": "Accounting.Admin AppFramework Payroll.Admin READ_ONLY Sales.Admin Webhook.Admin",
+                "scope": "AppFramework",
                 "client_id": self.settings.client_id,
                 "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
                 "client_assertion": client_token,
             }
             self.settings.custom = CustomAuthSettings(token_endpoint=token_endpoint, data=data)
         super().__post_init__()
+
+    def _configure_custom_auth(self, http: Http) -> None:
+        original_headers = self.settings.headers
+        self.settings.headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        try:
+            super()._configure_custom_auth(http)
+        finally:
+            self.settings.headers = original_headers
 
     def _get_private_key(self) -> RSAPrivateKey:
         """
