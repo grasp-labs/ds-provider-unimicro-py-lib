@@ -710,7 +710,7 @@ wheels = [
 
 [[package]]
 name = "ds-provider-unimicro-py-lib"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

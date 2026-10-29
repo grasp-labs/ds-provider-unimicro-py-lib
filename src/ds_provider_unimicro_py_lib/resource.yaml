@@ -3,7 +3,7 @@ name: unimicro
 description: Unimicro provider for the DS Business Workflow
 
 
-linked-service:
+linked_service:
   - name: Unimicro
     type: ds.resource.linked-service.unimicro
     version: 1.0.0
