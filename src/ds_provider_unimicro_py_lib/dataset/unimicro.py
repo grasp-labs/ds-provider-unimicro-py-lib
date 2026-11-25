@@ -28,6 +28,9 @@ from ..utils.ranges import expand_combinations
 
 logger = Logger.get_logger(__name__, package=True)
 
+# Query keys the dataset sets itself on paginated reads; ``read.params`` may not override them.
+_PAGINATED_RESERVED_PARAMS = frozenset({"top", "skip", "select", "filter"})
+
 
 @dataclass(kw_only=True)
 class UnimicroReadSettings(Serializable):
@@ -48,7 +51,13 @@ class UnimicroReadSettings(Serializable):
     """Custom filters to apply when reading from the Unimicro dataset. Knowledge of the filter syntax is required. Optional."""
 
     params: dict[str, str | int] | None = None
-    """Extra query parameters merged into the request URL. Optional."""
+    """
+    Extra query parameters merged into the request URL. Optional.
+
+    With ``paginate=True`` the dataset owns ``top``, ``skip``, ``select`` and ``filter`` (set them through
+    ``page_size``, ``fields`` and ``filters``), so those keys are rejected here. With ``paginate=False`` nothing is
+    reserved, but ``expand`` values override the same keys.
+    """
 
     paginate: bool = True
     """
@@ -184,6 +193,16 @@ class UnimicroDataset(
                 details={"expand": self.settings.read.expand, "paginate": self.settings.read.paginate},
             )
 
+        reserved_params = sorted(_PAGINATED_RESERVED_PARAMS & set(self.settings.read.params or {}))
+        if reserved_params:
+            raise ReadError(
+                message=(
+                    f"read.params must not contain {', '.join(reserved_params)} when read.paginate is True; "
+                    "use read.page_size, read.fields and read.filters instead."
+                ),
+                details={"reserved_params": reserved_params, "params": self.settings.read.params},
+            )
+
         logger.info("Fetching data from Unimicro API for data product: %s.", self.settings.data_product)
         last_modified_date = None
         if self.checkpoint and "incremental" in self.checkpoint:
@@ -223,6 +242,8 @@ class UnimicroDataset(
         except Exception as exc:
             logger.error("Error occurred while fetching data: %s", exc)
             self.checkpoint = build_checkpoint(starting_records_to_skip, last_modified_date)
+            if isinstance(exc, ReadError):
+                raise
             raise ReadError(
                 message=f"Error occurred while fetching data: {exc}",
                 details={
@@ -262,8 +283,10 @@ class UnimicroDataset(
         )
 
         all_records: list[dict[str, Any]] = []
+        current_combination: dict[str, int] | None = None
         try:
             for combination in combinations:
+                current_combination = combination
                 url = self._build_unpaginated_url(combination)
                 logger.debug("Making API request to %s.", url)
                 response = session.get(url, headers={"CompanyKey": self.settings.company_key})
@@ -280,11 +303,14 @@ class UnimicroDataset(
                 logger.info("Fetched %d records from the API for %s.", len(data), combination or "request")
         except Exception as exc:
             logger.error("Error occurred while fetching data: %s", exc)
+            if isinstance(exc, ReadError):
+                raise
             raise ReadError(
                 message=f"Error occurred while fetching data: {exc}",
                 details={
                     "successfully_fetched_records": len(all_records),
                     "data_product": self.settings.data_product,
+                    "expand": current_combination,
                     "settings": self.settings,
                 },
             ) from exc
@@ -319,7 +345,7 @@ class UnimicroDataset(
             Fully qualified request URL including query string.
         """
         base_url = self._build_url()
-        query_params: dict[str, str | int] = {"top": page_size}
+        query_params: dict[str, str | int] = {**(self.settings.read.params or {}), "top": page_size}
         if records_to_skip is not None:
             query_params["skip"] = records_to_skip
         if self.settings.read.fields:
@@ -337,9 +363,6 @@ class UnimicroDataset(
             filter_clauses.append(self.settings.read.filters)
         if filter_clauses:
             query_params["filter"] = " and ".join(filter_clauses)
-
-        if self.settings.read.params:
-            query_params.update(self.settings.read.params)
 
         return f"{base_url}?{urlencode(query_params)}"
 

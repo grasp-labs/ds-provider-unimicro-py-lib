@@ -134,6 +134,50 @@ def test_build_url_merges_params_into_query():
     assert query["hateoas"] == ["true"]
 
 
+def test_build_url_with_filters_never_lets_params_override_paging_keys():
+    dataset = make_dataset(
+        fields=["Name"],
+        filters="Status eq 'Open'",
+        params={"top": 5, "skip": 99, "select": "Other", "filter": "Other eq 1", "hateoas": "true"},
+    )
+
+    url = UnimicroDataset._build_url_with_filters(dataset, 2, 4, "2024-01-01T00:00:00+00:00")
+    query = parse_qs(urlsplit(url).query)
+
+    assert query["top"] == ["2"]
+    assert query["skip"] == ["4"]
+    assert set(query["select"][0].split(",")) == {"Name", "CreatedAt", "UpdatedAt"}
+    assert "CreatedAt gt '2024-01-01T00:00:00+00:00'" in query["filter"][0]
+    assert "Other eq 1" not in query["filter"][0]
+    assert query["hateoas"] == ["true"]
+
+
+@pytest.mark.parametrize("reserved_key", ["top", "skip", "select", "filter"])
+def test_fetch_data_rejects_reserved_params_when_paginated(reserved_key):
+    checkpoint = {"incremental": {"value": "2024-01-01T00:00:00+00:00"}, "pagination": {"value": 4}}
+    dataset = make_dataset(paginate=True, params={reserved_key: "x", "hateoas": "true"}, checkpoint=checkpoint)
+    session = Mock()
+
+    with pytest.raises(ReadError, match=reserved_key) as exc_info:
+        UnimicroDataset._fetch_data(dataset, session)
+
+    assert exc_info.value.details["reserved_params"] == [reserved_key]
+    session.get.assert_not_called()
+    # A configuration error is not a failed page, so the checkpoint is left alone.
+    assert dataset.checkpoint == checkpoint
+
+
+def test_fetch_data_unpaginated_allows_any_params_key():
+    dataset = make_dataset(paginate=False, params={"top": 5, "filter": "Status eq 'Open'"})
+    session = Mock()
+    session.get.return_value = make_response([{"Name": "Ada"}])
+
+    UnimicroDataset._fetch_data(dataset, session)
+
+    query = parse_qs(urlsplit(session.get.call_args.args[0]).query)
+    assert query == {"top": ["5"], "filter": ["Status eq 'Open'"]}
+
+
 def test_fetch_data_reads_pages_and_builds_output_and_checkpoint():
     dataset = make_dataset()
     session = Mock()
@@ -191,13 +235,22 @@ def test_fetch_data_resumes_from_checkpoint():
     assert "CreatedAt gt '2024-01-01T00:00:00+00:00'" in query["filter"][0]
 
 
-def test_fetch_data_rejects_non_list_payload():
+def test_fetch_data_rejects_non_list_payload_without_rewrapping_and_still_writes_checkpoint():
     dataset = make_dataset()
     session = Mock()
     session.get.return_value = make_response({"error": "nope"})
 
-    with pytest.raises(ReadError, match="expected list"):
+    with pytest.raises(ReadError, match="expected list") as exc_info:
         UnimicroDataset._fetch_data(dataset, session)
+
+    # The shape error is re-raised as is, so its own details survive instead of living on __cause__.
+    assert exc_info.value.details == {"payload_type": "dict"}
+    assert exc_info.value.__cause__ is None
+    # A bad page is still a failed read, so the checkpoint is written.
+    assert dataset.checkpoint == {
+        "incremental": {"value": None},
+        "pagination": {"value": 0},
+    }
 
 
 def test_build_url_with_filters_omits_skip_when_records_to_skip_is_none():
@@ -345,22 +398,44 @@ def test_fetch_data_unpaginated_leaves_checkpoint_untouched():
     assert dataset.checkpoint == checkpoint
 
 
-def test_fetch_data_unpaginated_rejects_non_list_payload():
-    dataset = make_dataset(paginate=False)
+def test_fetch_data_unpaginated_rejects_non_list_payload_without_rewrapping():
+    dataset = make_dataset(paginate=False, expand={"period": "1-2"})
     session = Mock()
     session.get.return_value = make_response({"error": "nope"})
 
-    with pytest.raises(ReadError, match="expected list"):
+    with pytest.raises(ReadError, match="expected list") as exc_info:
         UnimicroDataset._fetch_data(dataset, session)
 
+    # The shape error keeps its payload type and the failing expand combination.
+    assert exc_info.value.details == {"payload_type": "dict", "expand": {"period": 1}}
+    assert exc_info.value.__cause__ is None
 
-def test_fetch_data_unpaginated_wraps_request_errors_in_read_error():
+
+def test_fetch_data_unpaginated_wraps_request_errors_with_the_failing_combination():
+    dataset = make_dataset(paginate=False, expand={"period": "1-3"})
+    session = Mock()
+    session.get.side_effect = [
+        make_response([{"Name": "Ada"}]),
+        RuntimeError("API unavailable"),
+    ]
+
+    with pytest.raises(ReadError, match="API unavailable") as exc_info:
+        UnimicroDataset._fetch_data(dataset, session)
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert exc_info.value.details["expand"] == {"period": 2}
+    assert exc_info.value.details["successfully_fetched_records"] == 1
+
+
+def test_fetch_data_unpaginated_wraps_request_errors_without_expand():
     dataset = make_dataset(paginate=False)
     session = Mock()
     session.get.side_effect = RuntimeError("API unavailable")
 
-    with pytest.raises(ReadError, match="API unavailable"):
+    with pytest.raises(ReadError, match="API unavailable") as exc_info:
         UnimicroDataset._fetch_data(dataset, session)
+
+    assert exc_info.value.details["expand"] == {}
 
 
 def test_fetch_data_rejects_expand_when_paginated():
