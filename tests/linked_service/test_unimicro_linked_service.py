@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 )
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, generate_private_key
 from cryptography.hazmat.primitives.serialization import NoEncryption, pkcs12
+from ds_protocol_http_py_lib import HttpLinkedService
 from ds_protocol_http_py_lib.enums import AuthType
 from ds_protocol_http_py_lib.utils.http import Http
 from ds_resource_plugin_py_lib.common.resource.linked_service.errors import (
@@ -205,6 +206,18 @@ def test_configures_custom_auth() -> None:
         service = make_service(settings)
 
     assert service.settings.custom is not None
+
+
+def test_configure_custom_auth_skips_company_header_without_company_key() -> None:
+    private_key = generate_private_key(public_exponent=65537, key_size=2048)
+    service = make_service(make_settings(make_certificate(private_key)))
+    http = Mock()
+
+    with patch.object(HttpLinkedService, "_configure_custom_auth") as base_configure:
+        service._configure_custom_auth(http)
+
+    base_configure.assert_called_once_with(http)
+    http.session.headers.update.assert_not_called()
 
 
 def test_rejects_non_rsa_private_key() -> None:

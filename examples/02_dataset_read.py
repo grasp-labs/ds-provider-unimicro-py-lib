@@ -15,9 +15,13 @@ import logging
 import os
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from ds_common_logger_py_lib import Logger
-from ds_provider_unimicro_py_lib.linked_service.unimicro import UnimicroLinkedService, UnimicroLinkedServiceSettings
+
 from ds_provider_unimicro_py_lib.dataset.unimicro import UnimicroDataset, UnimicroDatasetSettings, UnimicroReadSettings
+from ds_provider_unimicro_py_lib.linked_service.unimicro import UnimicroLinkedService, UnimicroLinkedServiceSettings
+
+load_dotenv()
 
 Logger.configure(level=logging.DEBUG)
 logger = Logger.get_logger(__name__)
@@ -50,7 +54,7 @@ def main() -> None:
         data_product="Customers",
         company_key=company_key,
         read=UnimicroReadSettings(
-            page_size=100,
+            page_size=50,
         ),
     )
     dataset = UnimicroDataset(

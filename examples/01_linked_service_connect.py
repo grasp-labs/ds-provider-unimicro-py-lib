@@ -19,12 +19,16 @@ Prerequisites:
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from ds_common_logger_py_lib import Logger
+
 from ds_provider_unimicro_py_lib.linked_service.unimicro import UnimicroLinkedService, UnimicroLinkedServiceSettings
+
+load_dotenv()
 
 Logger.configure(level=logging.DEBUG)
 logger = Logger.get_logger(__name__)

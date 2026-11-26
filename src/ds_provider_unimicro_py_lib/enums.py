@@ -15,3 +15,22 @@ class ResourceType(StrEnum):
 
     UNIMICRO_LINKED_SERVICE = "ds.resource.linked-service.unimicro"
     UNIMICRO_DATASET = "ds.resource.dataset.unimicro"
+
+
+class DataProduct(StrEnum):
+    """
+    Provider-defined data products that do not map one-to-one to a native biz entity.
+
+    Any other ``data_product`` value is treated as a native biz entity and read with offset pagination.
+    """
+
+    TRIAL_BALANCE = "trialbalance"
+
+
+class TrialBalanceParam(StrEnum):
+    """
+    ``read.params`` keys that scope a ``trialbalance`` read.
+    """
+
+    FINANCIAL_YEAR = "financialyear"
+    PERIOD = "period"
