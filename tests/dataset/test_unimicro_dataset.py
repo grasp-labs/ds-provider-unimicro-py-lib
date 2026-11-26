@@ -12,6 +12,7 @@ import pytest
 from ds_resource_plugin_py_lib.common.resource.dataset.errors import ReadError
 from ds_resource_plugin_py_lib.common.resource.errors import NotSupportedError
 
+from ds_provider_unimicro_py_lib.dataset.products import trial_balance
 from ds_provider_unimicro_py_lib.dataset.unimicro import (
     UnimicroDataset,
     UnimicroDatasetSettings,
@@ -29,8 +30,6 @@ def make_dataset(
     data_product="Customers",
     page_size=2,
     params=None,
-    paginate=True,
-    expand=None,
 ):
     dataset = object.__new__(UnimicroDataset)
     dataset.settings = UnimicroDatasetSettings(
@@ -42,8 +41,6 @@ def make_dataset(
             fields=fields,
             filters=filters,
             params=params,
-            paginate=paginate,
-            expand=expand,
         ),
     )
     dataset.linked_service = Mock(settings=Mock(host="https://api.example.com/"))
@@ -72,8 +69,9 @@ def test_read_settings_deserialize_from_nested_payload():
     assert settings.read.filters == "Status eq 'Open'"
 
 
-def test_dataset_type_and_checkpoint_support():
-    dataset = make_dataset()
+@pytest.mark.parametrize("data_product", ["Customers", "trialbalance"])
+def test_dataset_type_and_checkpoint_support(data_product):
+    dataset = make_dataset(data_product=data_product)
 
     assert dataset.type == ResourceType.UNIMICRO_DATASET
     assert dataset.supports_checkpoint is True
@@ -88,6 +86,30 @@ def test_read_fetches_data_using_linked_service_connection():
     dataset.read()
 
     dataset._fetch_data.assert_called_once_with(session=session)
+
+
+def test_read_routes_trialbalance_to_its_product(monkeypatch):
+    dataset = make_dataset(data_product="TrialBalance")
+    session = Mock()
+    dataset.linked_service.connection = session
+    dataset._fetch_data = Mock()
+    fetch = Mock()
+    monkeypatch.setattr(trial_balance, "fetch", fetch)
+
+    dataset.read()
+
+    fetch.assert_called_once_with(dataset, session)
+    dataset._fetch_data.assert_not_called()
+
+
+def test_fetch_data_rejects_trialbalance_action_on_entity_reader():
+    dataset = make_dataset(data_product="accounts", params={"action": "trialbalance", "financialyear": 2026})
+    session = Mock()
+
+    with pytest.raises(ReadError, match="data_product='trialbalance'"):
+        UnimicroDataset._fetch_data(dataset, session)
+
+    session.get.assert_not_called()
 
 
 @pytest.mark.parametrize("method_name", ["create", "delete", "update", "rename", "list", "upsert", "purge"])
@@ -153,9 +175,9 @@ def test_build_url_with_filters_never_lets_params_override_paging_keys():
 
 
 @pytest.mark.parametrize("reserved_key", ["top", "skip", "select", "filter"])
-def test_fetch_data_rejects_reserved_params_when_paginated(reserved_key):
+def test_fetch_data_rejects_reserved_params(reserved_key):
     checkpoint = {"incremental": {"value": "2024-01-01T00:00:00+00:00"}, "pagination": {"value": 4}}
-    dataset = make_dataset(paginate=True, params={reserved_key: "x", "hateoas": "true"}, checkpoint=checkpoint)
+    dataset = make_dataset(params={reserved_key: "x", "hateoas": "true"}, checkpoint=checkpoint)
     session = Mock()
 
     with pytest.raises(ReadError, match=reserved_key) as exc_info:
@@ -165,17 +187,6 @@ def test_fetch_data_rejects_reserved_params_when_paginated(reserved_key):
     session.get.assert_not_called()
     # A configuration error is not a failed page, so the checkpoint is left alone.
     assert dataset.checkpoint == checkpoint
-
-
-def test_fetch_data_unpaginated_allows_any_params_key():
-    dataset = make_dataset(paginate=False, params={"top": 5, "filter": "Status eq 'Open'"})
-    session = Mock()
-    session.get.return_value = make_response([{"Name": "Ada"}])
-
-    UnimicroDataset._fetch_data(dataset, session)
-
-    query = parse_qs(urlsplit(session.get.call_args.args[0]).query)
-    assert query == {"top": ["5"], "filter": ["Status eq 'Open'"]}
 
 
 def test_fetch_data_reads_pages_and_builds_output_and_checkpoint():
@@ -284,165 +295,3 @@ def test_fetch_data_wraps_request_errors_in_read_error():
         "incremental": {"value": None},
         "pagination": {"value": 0},
     }
-
-
-def test_read_settings_deserialize_paginate_and_expand():
-    settings = UnimicroDatasetSettings.deserialize(
-        {
-            "data_product": "accounts",
-            "company_key": "test-company-key",
-            "read": {
-                "params": {"action": "trialbalance"},
-                "paginate": False,
-                "expand": {"financialyear": "2023-2024", "period": [1, 6, 12]},
-            },
-        }
-    )
-
-    assert settings.read.params == {"action": "trialbalance"}
-    assert settings.read.paginate is False
-    assert settings.read.expand == {"financialyear": "2023-2024", "period": [1, 6, 12]}
-
-
-def test_read_settings_default_to_paginated_without_expand():
-    read = UnimicroReadSettings()
-
-    assert read.paginate is True
-    assert read.expand is None
-
-
-def test_supports_checkpoint_follows_paginate_setting():
-    assert make_dataset(paginate=True).supports_checkpoint is True
-    assert make_dataset(paginate=False).supports_checkpoint is False
-
-
-def test_build_unpaginated_url_sends_only_params_and_expansion_values():
-    dataset = make_dataset(
-        paginate=False,
-        data_product="accounts",
-        fields=["Balance"],
-        filters="Status eq 'Open'",
-        params={"action": "trialbalance", "period": 1},
-    )
-
-    url = UnimicroDataset._build_unpaginated_url(dataset, {"financialyear": 2024, "period": 6})
-    parts = urlsplit(url)
-
-    assert parts.path == "/api/biz/accounts"
-    assert parse_qs(parts.query) == {
-        "action": ["trialbalance"],
-        "financialyear": ["2024"],
-        "period": ["6"],
-    }
-
-
-def test_build_unpaginated_url_has_no_query_string_without_params():
-    dataset = make_dataset(paginate=False)
-
-    url = UnimicroDataset._build_unpaginated_url(dataset)
-
-    assert url == "https://api.example.com/api/biz/Customers"
-
-
-def test_fetch_data_unpaginated_fans_out_over_expand_and_annotates_rows():
-    dataset = make_dataset(
-        paginate=False,
-        data_product="accounts",
-        params={"action": "trialbalance"},
-        expand={"financialyear": 2024, "period": "1-2"},
-        fields=["financialyear", "period", "AccountNumber", "Balance"],
-    )
-    session = Mock()
-    session.get.side_effect = [
-        make_response([{"AccountNumber": 1500, "Balance": 10.0, "StartBalance": 0.0}]),
-        make_response([{"AccountNumber": 1500, "Balance": 20.0, "StartBalance": 10.0}]),
-    ]
-
-    UnimicroDataset._fetch_data(dataset, session)
-
-    assert session.get.call_count == 2
-    queries = [parse_qs(urlsplit(call.args[0]).query) for call in session.get.call_args_list]
-    assert [query["period"][0] for query in queries] == ["1", "2"]
-    for query in queries:
-        assert query["action"] == ["trialbalance"]
-        assert query["financialyear"] == ["2024"]
-        assert not {"top", "skip", "select", "filter"} & set(query)
-    assert session.get.call_args.kwargs["headers"] == {"CompanyKey": "test-company-key"}
-    assert list(dataset.output.columns) == ["financialyear", "period", "AccountNumber", "Balance"]
-    assert dataset.output["financialyear"].tolist() == [2024, 2024]
-    assert dataset.output["period"].tolist() == [1, 2]
-    assert dataset.output["Balance"].tolist() == [10.0, 20.0]
-
-
-def test_fetch_data_unpaginated_without_expand_makes_one_request_and_keeps_all_columns():
-    dataset = make_dataset(paginate=False, data_product="accounts", params={"action": "trialbalance"})
-    session = Mock()
-    session.get.return_value = make_response([{"AccountNumber": 1500, "Balance": 10.0}])
-
-    UnimicroDataset._fetch_data(dataset, session)
-
-    assert session.get.call_count == 1
-    assert set(dataset.output.columns) == {"AccountNumber", "Balance"}
-
-
-def test_fetch_data_unpaginated_leaves_checkpoint_untouched():
-    checkpoint = {"incremental": {"value": "2024-01-01T00:00:00+00:00"}, "pagination": {"value": 4}}
-    dataset = make_dataset(paginate=False, checkpoint=checkpoint)
-    session = Mock()
-    session.get.return_value = make_response([{"Name": "Ada"}])
-
-    UnimicroDataset._fetch_data(dataset, session)
-
-    query = parse_qs(urlsplit(session.get.call_args.args[0]).query)
-    assert query == {}
-    assert dataset.checkpoint == checkpoint
-
-
-def test_fetch_data_unpaginated_rejects_non_list_payload_without_rewrapping():
-    dataset = make_dataset(paginate=False, expand={"period": "1-2"})
-    session = Mock()
-    session.get.return_value = make_response({"error": "nope"})
-
-    with pytest.raises(ReadError, match="expected list") as exc_info:
-        UnimicroDataset._fetch_data(dataset, session)
-
-    # The shape error keeps its payload type and the failing expand combination.
-    assert exc_info.value.details == {"payload_type": "dict", "expand": {"period": 1}}
-    assert exc_info.value.__cause__ is None
-
-
-def test_fetch_data_unpaginated_wraps_request_errors_with_the_failing_combination():
-    dataset = make_dataset(paginate=False, expand={"period": "1-3"})
-    session = Mock()
-    session.get.side_effect = [
-        make_response([{"Name": "Ada"}]),
-        RuntimeError("API unavailable"),
-    ]
-
-    with pytest.raises(ReadError, match="API unavailable") as exc_info:
-        UnimicroDataset._fetch_data(dataset, session)
-
-    assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert exc_info.value.details["expand"] == {"period": 2}
-    assert exc_info.value.details["successfully_fetched_records"] == 1
-
-
-def test_fetch_data_unpaginated_wraps_request_errors_without_expand():
-    dataset = make_dataset(paginate=False)
-    session = Mock()
-    session.get.side_effect = RuntimeError("API unavailable")
-
-    with pytest.raises(ReadError, match="API unavailable") as exc_info:
-        UnimicroDataset._fetch_data(dataset, session)
-
-    assert exc_info.value.details["expand"] == {}
-
-
-def test_fetch_data_rejects_expand_when_paginated():
-    dataset = make_dataset(paginate=True, expand={"period": "1-3"})
-    session = Mock()
-
-    with pytest.raises(ReadError, match=r"requires read\.paginate to be False"):
-        UnimicroDataset._fetch_data(dataset, session)
-
-    session.get.assert_not_called()

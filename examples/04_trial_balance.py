@@ -2,15 +2,14 @@
 **File:** ``04_trial_balance.py``
 **Region:** ``examples/04_trial_balance``
 
-Example 04: Fetch account balances (one row per account x period) with the generic dataset.
+Example 04: Fetch account balances (one row per account x period) with ``data_product="trialbalance"``.
 
-Uses Unimicro's native trial-balance action::
+The provider calls Unimicro's native trial-balance action once per fiscal year x period::
 
     GET /api/biz/accounts?action=trialbalance&financialyear={year}&period={n}
 
-The action returns the whole result in one response, so ``paginate`` is turned off, and
-``expand`` fans the request out over fiscal years x periods (one request per combination).
-The expanded values are added to every row as ``financialyear`` and ``period`` columns.
+``read.params`` scopes the read (``financialyear`` required, ``period`` defaults to ``1-12``; each an int or a
+``start-end`` range). Both values are added to every row as ``financialyear`` and ``period`` columns.
 
 Run from the repository root::
 
@@ -70,12 +69,10 @@ def main() -> None:
         version="v1.0.0",
         linked_service=linked_service,
         settings=UnimicroDatasetSettings(
-            data_product="accounts",
+            data_product="trialbalance",
             company_key=company_key,
             read=UnimicroReadSettings(
-                params={"action": "trialbalance"},
-                paginate=False,
-                expand={"financialyear": 2026, "period": "1-9"},
+                params={"financialyear": 2026, "period": "1-9"},
                 fields=["financialyear", "period", "AccountNumber", "AccountName", "Balance"],
             ),
         ),

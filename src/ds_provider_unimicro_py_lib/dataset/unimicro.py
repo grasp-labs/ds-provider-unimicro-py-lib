@@ -24,12 +24,10 @@ from ..enums import ResourceType
 from ..linked_service.unimicro import UnimicroLinkedService
 from ..utils.dataframe import project_fields
 from ..utils.incremental import build_checkpoint, build_incremental_filter, greatest_incremental_value
-from ..utils.ranges import expand_combinations
+from ..utils.params import RESERVED_PARAMS
+from .products import trial_balance
 
 logger = Logger.get_logger(__name__, package=True)
-
-# Query keys the dataset sets itself on paginated reads; ``read.params`` may not override them.
-_PAGINATED_RESERVED_PARAMS = frozenset({"top", "skip", "select", "filter"})
 
 
 @dataclass(kw_only=True)
@@ -54,30 +52,9 @@ class UnimicroReadSettings(Serializable):
     """
     Extra query parameters merged into the request URL. Optional.
 
-    With ``paginate=True`` the dataset owns ``top``, ``skip``, ``select`` and ``filter`` (set them through
-    ``page_size``, ``fields`` and ``filters``), so those keys are rejected here. With ``paginate=False`` nothing is
-    reserved, but ``expand`` values override the same keys.
-    """
-
-    paginate: bool = True
-    """
-    Whether to page through results with ``top``/``skip`` until an empty page is returned. Default is True.
-
-    Set to False for endpoints that return the full result in one response (e.g. ``accounts`` with
-    ``params={"action": "trialbalance", ...}``). In this mode a single request is made per expansion
-    combination; ``top``, ``skip``, ``select`` and ``filter`` are not sent (pass anything the endpoint needs via
-    ``params``), incremental filtering is disabled, and the checkpoint is neither read nor written.
-    The ``fields`` projection is still applied to the output.
-    """
-
-    expand: dict[str, list[int] | int | str] | None = None
-    """
-    Query parameters to fan out over, one request per combination (cartesian product). Optional.
-
-    Each value is an int, a list of ints, or a ``start-end`` range string, e.g.
-    ``{"financialyear": "2023-2026", "period": "1-12"}``. The expanded values are sent as query parameters
-    (overriding the same key in ``params``) and added as columns to every returned row.
-    Requires ``paginate=False``.
+    The dataset owns ``top``, ``skip``, ``select`` and ``filter`` (set them through ``page_size``, ``fields`` and
+    ``filters``), so those keys are rejected here. For ``data_product="trialbalance"`` this scopes the read:
+    ``financialyear`` (required) and ``period`` (default ``1-12``), each an int or a ``start-end`` range.
     """
 
 
@@ -88,7 +65,10 @@ class UnimicroDatasetSettings(DatasetSettings):
     """
 
     data_product: str
-    """Native Unimicro biz entity name (e.g. ``Customers``, ``accounts``)."""
+    """
+    Native Unimicro biz entity name (e.g. ``Customers``, ``accounts``), read with offset pagination,
+    or a provider-defined product from ``DataProduct`` (e.g. ``trialbalance``).
+    """
 
     company_key: str
     """The company key used for fetching data from the Unimicro provider."""
@@ -151,26 +131,30 @@ class UnimicroDataset(
         incremental value. Consumers should persist checkpoints separately for
         each dataset and company.
 
-        Checkpointing applies to paginated reads only. With ``paginate=False`` the
-        whole result is fetched in one go, so there is nothing to resume or filter on.
+        ``trialbalance`` reads are always full loads: the checkpoint is not used as a
+        starting point and is reset after a successful read.
 
         Returns:
-            bool: True when ``settings.read.paginate`` is enabled, otherwise False.
+            bool: Always True.
         """
-        return self.settings.read.paginate
+        return True
 
     def read(self) -> None:
         """
         Reads data from the Unimicro dataset.
 
-        This method should implement the logic to fetch data from the Unimicro API,
-        respecting the current checkpoint for incremental loading.
+        Native biz entities are paged through with ``top``/``skip``, respecting the current
+        checkpoint for incremental loading. Provider-defined products (``DataProduct``) use
+        their own read pattern.
 
         Returns:
             None
         """
         logger.info("Reading data from Unimicro dataset with settings: %s", self.settings)
         session = self.linked_service.connection
+        if trial_balance.handles(self.settings.data_product):
+            trial_balance.fetch(self, session)
+            return
         self._fetch_data(session=session)
 
     def _fetch_data(self, session: Any) -> None:
@@ -183,21 +167,12 @@ class UnimicroDataset(
         Returns:
             None
         """
-        if not self.settings.read.paginate:
-            self._fetch_data_unpaginated(session)
-            return
-
-        if self.settings.read.expand:
-            raise ReadError(
-                message="read.expand requires read.paginate to be False.",
-                details={"expand": self.settings.read.expand, "paginate": self.settings.read.paginate},
-            )
-
-        reserved_params = sorted(_PAGINATED_RESERVED_PARAMS & set(self.settings.read.params or {}))
+        trial_balance.reject_if_misused(self.settings)
+        reserved_params = sorted(RESERVED_PARAMS & set(self.settings.read.params or {}))
         if reserved_params:
             raise ReadError(
                 message=(
-                    f"read.params must not contain {', '.join(reserved_params)} when read.paginate is True; "
+                    f"read.params must not contain {', '.join(reserved_params)}; "
                     "use read.page_size, read.fields and read.filters instead."
                 ),
                 details={"reserved_params": reserved_params, "params": self.settings.read.params},
@@ -261,76 +236,6 @@ class UnimicroDataset(
             last_loaded_records=0,
             last_modified_date=latest_incremental_value or last_modified_date,
         )
-
-    def _fetch_data_unpaginated(self, session: Any) -> None:
-        """
-        Fetch data with one plain request per ``read.expand`` combination (or a single request without ``expand``).
-
-        No ``top``/``skip``/``select``/``filter`` is sent, and the checkpoint is left untouched.
-        The expanded parameter values are added to every returned row as columns.
-
-        Args:
-            session (Any): The session object used to make API requests.
-
-        Returns:
-            None
-        """
-        combinations = expand_combinations(self.settings.read.expand)
-        logger.info(
-            "Fetching data from Unimicro API for data product: %s (%d request(s), unpaginated).",
-            self.settings.data_product,
-            len(combinations),
-        )
-
-        all_records: list[dict[str, Any]] = []
-        current_combination: dict[str, int] | None = None
-        try:
-            for combination in combinations:
-                current_combination = combination
-                url = self._build_unpaginated_url(combination)
-                logger.debug("Making API request to %s.", url)
-                response = session.get(url, headers={"CompanyKey": self.settings.company_key})
-                data = response.json()
-                if not isinstance(data, list):
-                    raise ReadError(
-                        message="Unexpected Unimicro biz response shape (expected list).",
-                        details={"payload_type": type(data).__name__, "expand": combination},
-                    )
-
-                for record in data:
-                    record.update(combination)
-                    all_records.append(record)
-                logger.info("Fetched %d records from the API for %s.", len(data), combination or "request")
-        except Exception as exc:
-            logger.error("Error occurred while fetching data: %s", exc)
-            if isinstance(exc, ReadError):
-                raise
-            raise ReadError(
-                message=f"Error occurred while fetching data: {exc}",
-                details={
-                    "successfully_fetched_records": len(all_records),
-                    "data_product": self.settings.data_product,
-                    "expand": current_combination,
-                    "settings": self.settings,
-                },
-            ) from exc
-
-        logger.info("Total successfully fetched records: %d", len(all_records))
-        self.output = project_fields(pd.json_normalize(all_records, sep="_"), self.settings.read.fields)
-
-    def _build_unpaginated_url(self, extra_params: dict[str, int] | None = None) -> str:
-        """
-        Build a plain request URL from ``read.params`` plus the given expansion values.
-
-        Args:
-            extra_params: Expansion values; these override the same keys in ``read.params``.
-
-        Returns:
-            str: Fully qualified request URL, with a query string only if there are parameters.
-        """
-        query_params: dict[str, str | int] = {**(self.settings.read.params or {}), **(extra_params or {})}
-        base_url = self._build_url()
-        return f"{base_url}?{urlencode(query_params)}" if query_params else base_url
 
     def _build_url_with_filters(self, page_size: int, records_to_skip: int | None, last_modified_date: str | None) -> str:
         """
